@@ -26,6 +26,7 @@ import { serializeV2 } from '../policy/schema-v2.js';
 import { makePackageMetaResolvers } from '../policy/package-meta.js';
 import { renderJsonReport } from '../report/json.js';
 import { installFlushHooks } from './flush-hooks.js';
+import { createEventSink } from './event-sink.js';
 
 export interface ObserveModeOptions {
   /** Directory to write output files into. Defaults to process.cwd(). */
@@ -46,6 +47,10 @@ export function startObserveMode(options: ObserveModeOptions = {}): () => void {
   const reportFile = path.join(outputDir, options.reportFile ?? 'capwarden-report.json');
   const policyFile = path.join(outputDir, options.policyFile ?? 'capwarden-policy.json');
   const schema = options.schema ?? 'v1';
+
+  // Before interceptor install: mints CAPWARDEN_RUN_ID so nested Node
+  // processes join this run instead of overwriting its outputs.
+  const sink = createEventSink();
 
   // Install GA attribution patch so subsequent require()s set async context
   installModuleLoadPatch();
@@ -70,23 +75,29 @@ export function startObserveMode(options: ObserveModeOptions = {}): () => void {
       interceptor.uninstall();
     }
 
-    const report = renderJsonReport(log);
+    // Persist this process's events; only the root (outermost) process — which
+    // exits last and therefore sees the complete union — writes the outputs.
+    const merged = sink.flush(log);
+    if (!sink.isRoot) return;
+
+    const report = renderJsonReport(merged);
     let serialized: string;
     if (schema === 'v2') {
       const meta = makePackageMetaResolvers(outputDir);
       serialized = serializeV2(
-        generateV2Policy(log, {
+        generateV2Policy(merged, {
           strict: options.strict,
           resolveVersion: meta.resolveVersion,
           hasInstallScript: meta.hasInstallScript,
         })
       );
     } else {
-      serialized = serializeV1(generateV1Policy(log));
+      serialized = serializeV1(generateV1Policy(merged));
     }
 
     fs.writeFileSync(reportFile, JSON.stringify(report, null, 2), 'utf-8');
     fs.writeFileSync(policyFile, serialized, 'utf-8');
+    sink.cleanup();
 
     console.error(`\n[CapWarden] Observe complete.`);
     console.error(`  Report  → ${reportFile}`);

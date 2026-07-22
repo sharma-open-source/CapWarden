@@ -40,6 +40,23 @@ describe('interceptors/fs', () => {
     }
   });
 
+  it('records a file: URL path decoded, not percent-encoded (spaces in path)', () => {
+    const spacedDir = path.join(tmpDir, 'untitled folder');
+    fs.mkdirSync(spacedDir);
+    const filePath = path.join(spacedDir, 'read.txt');
+    fs.writeFileSync(filePath, 'hello');
+
+    const interceptor = createFsInterceptor({ log });
+    interceptor.install();
+    try {
+      fs.readFileSync(new URL(`file://${filePath.replace(/ /g, '%20')}`), 'utf-8');
+      const event = log.find((e) => e.detail.kind === 'fs' && e.detail.mode === 'read');
+      expect(event?.detail.kind === 'fs' && event.detail.path).toBe(filePath);
+    } finally {
+      cleanup(interceptor);
+    }
+  });
+
   it('records a writeFileSync access as write', () => {
     const filePath = path.join(tmpDir, 'write.txt');
     const interceptor = createFsInterceptor({ log });

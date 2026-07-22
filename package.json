@@ -1,6 +1,6 @@
 {
   "name": "capwarden",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Per-dependency capability guard for Node.js / npm",
   "type": "commonjs",
   "main": "dist/index.js",

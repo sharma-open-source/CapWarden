@@ -17,6 +17,7 @@
  */
 
 import type * as fsType from 'fs';
+import { fileURLToPath } from 'url';
 import type { AccessEvent } from '../types.js';
 import { attributeCurrentCall } from '../attribution/stack.js';
 import { CapWardenViolationError } from '../errors.js';
@@ -39,7 +40,15 @@ function flagsMode(flags: unknown): FsMode {
 /** Normalise a path argument (Buffer, URL, or string) to string. */
 function normalisePath(p: unknown): string {
   if (typeof p === 'string') return p;
-  if (p instanceof URL) return p.pathname;
+  if (p instanceof URL) {
+    // .pathname keeps percent-encoding (`untitled%20folder`) — decode to the
+    // real filesystem path so recorded events match string-path accesses.
+    try {
+      return fileURLToPath(p);
+    } catch {
+      return p.pathname; // non-file: URL — fs will reject it; record as-is
+    }
+  }
   if (Buffer.isBuffer(p)) return p.toString();
   return String(p);
 }

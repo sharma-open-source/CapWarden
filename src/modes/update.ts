@@ -19,6 +19,7 @@ import { diffPolicies, hasAdditions } from '../policy/diff.js';
 import { parseV1, serializeV1, type PolicyV1 } from '../policy/schema-v1.js';
 import { renderPolicyDiff } from '../report/terminal.js';
 import { installFlushHooks } from './flush-hooks.js';
+import { createEventSink } from './event-sink.js';
 
 export interface UpdateModeOptions {
   /** Path to the committed policy file. */
@@ -34,6 +35,10 @@ export interface UpdateModeOptions {
 
 export function startUpdateMode(options: UpdateModeOptions): () => void {
   const log: AccessLog = [];
+
+  // Before interceptor install: mints CAPWARDEN_RUN_ID so nested Node
+  // processes join this run instead of diffing their partial logs.
+  const sink = createEventSink();
 
   const interceptors: Interceptor[] = [
     createEnvInterceptor({ log }),
@@ -55,6 +60,12 @@ export function startUpdateMode(options: UpdateModeOptions): () => void {
       interceptor.uninstall();
     }
 
+    // Persist this process's events; only the root — which exits last and sees
+    // the complete union — diffs, writes, and sets the exit code. A child's
+    // partial log must not trip --fail-on-additions or clobber the diff.
+    const merged = sink.flush(log);
+    if (!sink.isRoot) return;
+
     let oldPolicy: PolicyV1;
     try {
       oldPolicy = parseV1(fs.readFileSync(options.policyPath, 'utf-8'));
@@ -62,13 +73,15 @@ export function startUpdateMode(options: UpdateModeOptions): () => void {
       console.error(`[CapWarden] Could not read committed policy at ${options.policyPath}`);
       console.error(`  Run 'capwarden observe' first to generate an initial policy.`);
       process.exitCode = 1;
+      sink.cleanup();
       return;
     }
 
-    const newPolicy = generateV1Policy(log);
+    const newPolicy = generateV1Policy(merged);
     const diff = diffPolicies(oldPolicy, newPolicy);
 
     renderPolicyDiff(diff);
+    sink.cleanup();
 
     if (options.write) {
       fs.writeFileSync(options.policyPath, serializeV1(newPolicy), 'utf-8');
