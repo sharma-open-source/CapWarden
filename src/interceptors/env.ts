@@ -127,8 +127,24 @@ export function createEnvInterceptor(options: InterceptorOptions): Interceptor {
     },
 
     set(target, prop: string | symbol, value: unknown) {
-      // Allow writes through unmodified
+      // Writing env is itself a capability — mutating NODE_TLS_REJECT_UNAUTHORIZED,
+      // NODE_OPTIONS, etc. is at least as attack-relevant as reading. Charge the
+      // write to the responsible package; in enforce mode a block withholds the
+      // mutation (the assignment does not take effect) rather than the value.
+      if (typeof prop === 'string') {
+        const blocked = recordRead(prop);
+        if (blocked) return true; // silently drop the write; do not mutate
+      }
       (target as Record<string | symbol, unknown>)[prop] = value;
+      return true;
+    },
+
+    deleteProperty(target, prop: string | symbol) {
+      if (typeof prop === 'string') {
+        const blocked = recordRead(prop);
+        if (blocked) return true; // block the delete; leave the value intact
+      }
+      delete (target as Record<string | symbol, unknown>)[prop];
       return true;
     },
 

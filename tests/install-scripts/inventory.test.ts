@@ -77,4 +77,23 @@ describe('diffInventory', () => {
     const added = diffInventory(oldInv, newInv);
     expect(added.map((p) => p.packageName)).toEqual(['b']);
   });
+
+  it('flags a version bump of a package that already had an install script (FR-15)', () => {
+    const oldInv = { generatedAt: 't', packages: [{ packageName: 'a', version: '1.0.0', scripts: ['postinstall'] }] };
+    const newInv = { generatedAt: 't', packages: [{ packageName: 'a', version: '2.0.0', scripts: ['postinstall'] }] };
+    const added = diffInventory(oldInv, newInv);
+    expect(added.map((p) => `${p.packageName}@${p.version}`)).toEqual(['a@2.0.0']);
+  });
+
+  it('flags a changed script set at the same version', () => {
+    const oldInv = { generatedAt: 't', packages: [{ packageName: 'a', version: '1.0.0', scripts: ['postinstall'] }] };
+    const newInv = { generatedAt: 't', packages: [{ packageName: 'a', version: '1.0.0', scripts: ['postinstall', 'preinstall'] }] };
+    const added = diffInventory(oldInv, newInv);
+    expect(added.map((p) => p.packageName)).toEqual(['a']);
+  });
+
+  it('does not flag an unchanged name@version with an unchanged script set', () => {
+    const inv = { generatedAt: 't', packages: [{ packageName: 'a', version: '1.0.0', scripts: ['postinstall'] }] };
+    expect(diffInventory(inv, inv)).toEqual([]);
+  });
 });

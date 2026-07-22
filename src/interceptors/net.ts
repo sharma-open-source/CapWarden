@@ -57,6 +57,7 @@ interface Originals {
   httpsGet: typeof httpsType.get;
   netConnect: NetConnectFn;
   netCreateConnection: typeof netType.createConnection;
+  netSocketConnect: typeof netType.Socket.prototype.connect;
   tlsConnect: typeof tlsType.connect;
   dgramCreateSocket: typeof dgramType.createSocket;
   dnsLookup: typeof dnsType.lookup;
@@ -159,9 +160,24 @@ function extractFetchTarget(input: unknown): { host: string; port: number } {
   }
 }
 
+/**
+ * The full `dns` name-resolution surface beyond `lookup`. Every one of these
+ * resolves a hostname and is a viable exfiltration channel (a compromised
+ * package can smuggle data in the QNAME of a `resolveTxt`), so all must be
+ * attributed and enforceable — not just `resolve`. `lookup` is handled
+ * separately because its host argument position differs on `lookupService`.
+ */
+const DNS_RESOLVE_METHODS = [
+  'resolve', 'resolve4', 'resolve6', 'resolveAny', 'resolveCaa', 'resolveCname',
+  'resolveMx', 'resolveNaptr', 'resolveNs', 'resolvePtr', 'resolveSoa',
+  'resolveSrv', 'resolveTxt', 'reverse',
+] as const;
+
 export function createNetInterceptor(options: InterceptorOptions): Interceptor {
   const { log, onAccess, onInternalError = 'fail-open' } = options;
   let originals: Originals | null = null;
+  // Restore closures for the table-driven dns resolve* family + Resolver proto.
+  let dnsRestores: Array<() => void> = [];
 
   const intercept = (host: string, port: number): void => {
     try {
@@ -193,6 +209,7 @@ export function createNetInterceptor(options: InterceptorOptions): Interceptor {
         httpsGet: httpsModule.get,
         netConnect: netModule.connect,
         netCreateConnection: netModule.createConnection,
+        netSocketConnect: netModule.Socket.prototype.connect,
         tlsConnect: tlsModule.connect,
         dgramCreateSocket: dgramModule.createSocket,
         dnsLookup: dnsModule.lookup,
@@ -247,6 +264,22 @@ export function createNetInterceptor(options: InterceptorOptions): Interceptor {
       };
       (netModule as { connect: unknown }).connect = netWrap;
       (netModule as { createConnection: unknown }).createConnection = netWrap;
+
+      // net.Socket.prototype.connect — the low-level choke point every socket
+      // connection ultimately routes through. Wrapping it closes the direct
+      // `new net.Socket().connect(...)` path, which bypasses the module-level
+      // factories above. Higher-level wraps (http/tls/net.connect) still fire
+      // first and, in enforce mode, throw before their Socket is created — so
+      // this does not double-block; in observe the duplicate event dedupes in
+      // both the policy and the report.
+      (netModule.Socket.prototype as { connect: unknown }).connect = function (
+        this: netType.Socket,
+        ...args: Parameters<typeof netType.Socket.prototype.connect>
+      ) {
+        const { host, port } = extractNetHostPort(args as unknown as Parameters<NetConnectFn>);
+        intercept(host, port);
+        return originals!.netSocketConnect.apply(this, args);
+      };
 
       // tls.connect
       (tlsModule as { connect: unknown }).connect = function (
@@ -316,6 +349,38 @@ export function createNetInterceptor(options: InterceptorOptions): Interceptor {
       dnsModule.promises.lookup = wrapDnsPromise(originals.dnsPromisesLookup);
       dnsModule.promises.resolve = wrapDnsPromise(originals.dnsPromisesResolve);
 
+      // Fan out over the rest of the resolve* family (callback + promises) and
+      // over dns.Resolver instances, which bypass the module-level functions.
+      const wrapDnsFamily = (
+        holder: Record<string, unknown>,
+        name: string,
+        kind: 'callback' | 'promise'
+      ): void => {
+        const orig = holder[name];
+        if (typeof orig !== 'function') return;
+        holder[name] = kind === 'promise'
+          ? wrapDnsPromise(orig as (...a: never[]) => Promise<unknown>)
+          : wrapDnsCallback(orig as (...a: never[]) => unknown);
+        dnsRestores.push(() => { holder[name] = orig; });
+      };
+
+      const dnsCb = dnsModule as unknown as Record<string, unknown>;
+      const dnsProm = dnsModule.promises as unknown as Record<string, unknown>;
+      const resolverProto = dnsModule.Resolver?.prototype as unknown as Record<string, unknown> | undefined;
+      const promisesResolverProto =
+        dnsModule.promises.Resolver?.prototype as unknown as Record<string, unknown> | undefined;
+
+      for (const name of DNS_RESOLVE_METHODS) {
+        // 'resolve' on the module + promises is already wrapped above; skip to
+        // avoid double interception, but still cover it on the Resolver protos.
+        if (name !== 'resolve') {
+          wrapDnsFamily(dnsCb, name, 'callback');
+          wrapDnsFamily(dnsProm, name, 'promise');
+        }
+        if (resolverProto) wrapDnsFamily(resolverProto, name, 'callback');
+        if (promisesResolverProto) wrapDnsFamily(promisesResolverProto, name, 'promise');
+      }
+
       // global fetch — reject on block
       if (originals.fetch) {
         const originalFetch = originals.fetch;
@@ -333,12 +398,15 @@ export function createNetInterceptor(options: InterceptorOptions): Interceptor {
 
     uninstall() {
       if (!originals) return;
+      for (const restore of dnsRestores) restore();
+      dnsRestores = [];
       (httpModule as { request: unknown }).request = originals.httpRequest;
       (httpModule as { get: unknown }).get = originals.httpGet;
       (httpsModule as { request: unknown }).request = originals.httpsRequest;
       (httpsModule as { get: unknown }).get = originals.httpsGet;
       (netModule as { connect: unknown }).connect = originals.netConnect;
       (netModule as { createConnection: unknown }).createConnection = originals.netCreateConnection;
+      (netModule.Socket.prototype as { connect: unknown }).connect = originals.netSocketConnect;
       (tlsModule as { connect: unknown }).connect = originals.tlsConnect;
       (dgramModule as { createSocket: unknown }).createSocket = originals.dgramCreateSocket;
       (dnsModule as { lookup: unknown }).lookup = originals.dnsLookup;

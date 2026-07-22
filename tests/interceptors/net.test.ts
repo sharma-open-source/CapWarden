@@ -180,6 +180,101 @@ describe('interceptors/net', () => {
     }
   });
 
+  it('intercepts a direct new net.Socket().connect (bypass of the factories)', () => {
+    const interceptor = createNetInterceptor({ log });
+    interceptor.install();
+    const socket = new net.Socket();
+    try {
+      socket.connect(9, '127.0.0.1');
+      const ev = log.find(
+        (e) => e.detail.kind === 'net' && e.detail.host === '127.0.0.1' && e.detail.port === 9
+      );
+      expect(ev).toBeDefined();
+    } finally {
+      socket.on('error', () => {});
+      socket.destroy();
+      interceptor.uninstall();
+    }
+  });
+
+  it('blocks a direct net.Socket().connect in enforce mode', () => {
+    const interceptor = createNetInterceptor({
+      log,
+      onAccess: () => {
+        throw new CapWardenViolationError('pkg', 'net:127.0.0.1:9');
+      },
+    });
+    interceptor.install();
+    const socket = new net.Socket();
+    try {
+      expect(() => socket.connect(9, '127.0.0.1')).toThrow(CapWardenViolationError);
+    } finally {
+      socket.on('error', () => {});
+      socket.destroy();
+      interceptor.uninstall();
+    }
+  });
+
+  it('restores net.Socket.prototype.connect on uninstall', () => {
+    const orig = net.Socket.prototype.connect;
+    const interceptor = createNetInterceptor({ log });
+    interceptor.install();
+    expect(net.Socket.prototype.connect).not.toBe(orig);
+    interceptor.uninstall();
+    expect(net.Socket.prototype.connect).toBe(orig);
+  });
+
+  it('logs a net event for dns.resolveTxt — the fan-out family (exfil channel)', async () => {
+    const interceptor = createNetInterceptor({ log });
+    interceptor.install();
+    try {
+      await new Promise<void>((resolve) => {
+        dns.resolveTxt('capwarden-exfil.test.example', () => resolve());
+      });
+      const ev = log.find(
+        (e) => e.detail.kind === 'net' && e.detail.host === 'capwarden-exfil.test.example'
+      );
+      expect(ev).toBeDefined();
+    } finally {
+      interceptor.uninstall();
+    }
+  });
+
+  it('blocks dns.resolveTxt via callback when enforced', async () => {
+    const interceptor = createNetInterceptor({
+      log,
+      onAccess: () => {
+        throw new CapWardenViolationError('pkg', 'net:blocked.example:0');
+      },
+    });
+    interceptor.install();
+    try {
+      const err = await new Promise<unknown>((resolve) => {
+        dns.resolveTxt('blocked.example', (e) => resolve(e));
+      });
+      expect(err).toBeInstanceOf(CapWardenViolationError);
+    } finally {
+      interceptor.uninstall();
+    }
+  });
+
+  it('intercepts a dns.Resolver instance method (bypass of module functions)', async () => {
+    const interceptor = createNetInterceptor({ log });
+    interceptor.install();
+    const resolver = new dns.Resolver();
+    try {
+      await new Promise<void>((resolve) => {
+        resolver.resolve4('capwarden-resolver.test.example', () => resolve());
+      });
+      const ev = log.find(
+        (e) => e.detail.kind === 'net' && e.detail.host === 'capwarden-resolver.test.example'
+      );
+      expect(ev).toBeDefined();
+    } finally {
+      interceptor.uninstall();
+    }
+  });
+
   it('logs a net event for dns.lookup (GAP §1.2)', async () => {
     const interceptor = createNetInterceptor({ log });
     interceptor.install();

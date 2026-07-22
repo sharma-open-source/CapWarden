@@ -92,11 +92,29 @@ export function buildInstallInventory(nodeModulesDir: string): InstallInventory 
   return { generatedAt: new Date().toISOString(), packages: entries };
 }
 
-/** Diff two inventories, returning newly added lifecycle-script packages. */
+/**
+ * Diff two inventories, returning lifecycle-script packages that are new or
+ * changed. Keyed by `name@version` (not name alone): a version bump that
+ * introduces or alters an install script is exactly the supply-chain event
+ * FR-15 targets, so a package that already had a script under its old version
+ * must still be flagged when the new version's script set differs.
+ */
 export function diffInventory(
   oldInventory: InstallInventory,
   newInventory: InstallInventory
 ): InstallScriptEntry[] {
-  const oldNames = new Set(oldInventory.packages.map((p) => p.packageName));
-  return newInventory.packages.filter((p) => !oldNames.has(p.packageName));
+  const oldByKey = new Map<string, InstallScriptEntry>();
+  for (const p of oldInventory.packages) {
+    oldByKey.set(`${p.packageName}@${p.version}`, p);
+  }
+  return newInventory.packages.filter((p) => {
+    const prior = oldByKey.get(`${p.packageName}@${p.version}`);
+    if (!prior) return true; // new package or new version
+    // Same name@version but a different script set — flag the change.
+    const priorScripts = new Set(prior.scripts);
+    return (
+      p.scripts.length !== prior.scripts.length ||
+      p.scripts.some((s) => !priorScripts.has(s))
+    );
+  });
 }

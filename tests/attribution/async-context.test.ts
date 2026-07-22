@@ -133,6 +133,60 @@ describe('attribution/async-context — installModuleLoadPatch (subprocess)', ()
     expect(result).toBe('test-program');
   });
 
+  it('preserves static properties on a function export (e.g. express.Router)', () => {
+    const result = runScript(`
+      'use strict';
+      const path = require('path');
+      const os = require('os');
+      const fs = require('fs');
+      // Build a throwaway package whose module.exports is a function carrying statics.
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-statics-'));
+      const pkgDir = path.join(dir, 'node_modules', 'fake-express');
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'fake-express', version: '1.0.0', main: 'index.js' }));
+      fs.writeFileSync(path.join(pkgDir, 'index.js'),
+        'function createApp(){return \\'app\\';}\\n' +
+        'createApp.Router = function Router(){return \\'router\\';};\\n' +
+        'createApp.static = { json: true };\\n' +
+        'module.exports = createApp;\\n');
+
+      const { installModuleLoadPatch } = require('./dist/attribution/async-context.js');
+      installModuleLoadPatch();
+      const { createRequire } = require('module');
+      const req = createRequire(path.join(dir, 'noop.js'));
+      const e = req('fake-express');
+      console.log(JSON.stringify({
+        callable: typeof e === 'function' && e() === 'app',
+        router: typeof e.Router === 'function' && e.Router() === 'router',
+        staticObj: !!e.static && e.static.json === true,
+      }));
+    `);
+    expect(JSON.parse(result)).toEqual({ callable: true, router: true, staticObj: true });
+  });
+
+  it('returns a stable identity across repeated requires of the same package', () => {
+    const result = runScript(`
+      'use strict';
+      const path = require('path');
+      const os = require('os');
+      const fs = require('fs');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-identity-'));
+      const pkgDir = path.join(dir, 'node_modules', 'fake-singleton');
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'fake-singleton', version: '1.0.0', main: 'index.js' }));
+      fs.writeFileSync(path.join(pkgDir, 'index.js'), 'module.exports = { state: {} };\\n');
+
+      const { installModuleLoadPatch } = require('./dist/attribution/async-context.js');
+      installModuleLoadPatch();
+      const { createRequire } = require('module');
+      const req = createRequire(path.join(dir, 'noop.js'));
+      const a = req('fake-singleton');
+      const b = req('fake-singleton');
+      console.log(JSON.stringify({ sameExports: a === b, sameState: a.state === b.state }));
+    `);
+    expect(JSON.parse(result)).toEqual({ sameExports: true, sameState: true });
+  });
+
   it('async context flows through Promise continuations after patch', () => {
     const result = runScript(`
       'use strict';

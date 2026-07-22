@@ -93,7 +93,11 @@ const CW_OWN_FRAME =
  */
 export function classifyReaderContext(): 'internal' | 'external' {
   const savedPrepare = Error.prepareStackTrace;
+  const savedLimit = Error.stackTraceLimit;
   try {
+    // Node's default limit of 10 can truncate the stack before the relevant
+    // frame; capture more so classification does not silently fall through.
+    Error.stackTraceLimit = STACK_TRACE_LIMIT;
     let frames: NodeJS.CallSite[] = [];
     Error.prepareStackTrace = (_err, callsites) => {
       frames = callsites;
@@ -119,8 +123,19 @@ export function classifyReaderContext(): 'internal' | 'external' {
     return 'external';
   } finally {
     Error.prepareStackTrace = savedPrepare;
+    Error.stackTraceLimit = savedLimit;
   }
 }
+
+/**
+ * How many stack frames to capture during attribution. Node's default of 10 is
+ * too shallow: when a package's `node_modules` frame sits below several
+ * intervening app/library frames, a 10-frame capture returns 'app' — attribution
+ * fails *toward allow*, silently. 32 comfortably covers realistic call depths
+ * (attribution returns at the first node_modules frame, so the full walk is the
+ * rare no-package case) while keeping the per-call capture cheap.
+ */
+const STACK_TRACE_LIMIT = 32;
 
 /**
  * Walk the V8 call stack and return the package owning the nearest
@@ -128,7 +143,9 @@ export function classifyReaderContext(): 'internal' | 'external' {
  */
 export function attributeFromStack(): string {
   const savedPrepare = Error.prepareStackTrace;
+  const savedLimit = Error.stackTraceLimit;
   try {
+    Error.stackTraceLimit = STACK_TRACE_LIMIT;
     let frames: NodeJS.CallSite[] = [];
     Error.prepareStackTrace = (_err, callsites) => {
       frames = callsites;
@@ -146,5 +163,6 @@ export function attributeFromStack(): string {
     return 'app';
   } finally {
     Error.prepareStackTrace = savedPrepare;
+    Error.stackTraceLimit = savedLimit;
   }
 }

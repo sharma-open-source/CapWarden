@@ -102,6 +102,17 @@ export function installModuleLoadPatch(): void {
   };
 }
 
+/**
+ * Cache of already-wrapped exports, keyed by the original exports object.
+ *
+ * `Module._load` returns Node's cached exports for repeated `require()`s of the
+ * same module, so without this every require would re-wrap and yield a *new*
+ * object — breaking `require('x') === require('x')` and singleton/state
+ * patterns, and re-doing the wrap work each time. Keying on the original
+ * exports makes the wrapped result stable and cheap on repeat.
+ */
+const wrappedCache = new WeakMap<object, unknown>();
+
 /** Remove the Module._load patch (for testing and graceful shutdown). */
 export function uninstallModuleLoadPatch(): void {
   if (!_patchInstalled) return;
@@ -147,23 +158,37 @@ function resolvePackageNameFromRequest(request: string, parent: unknown): string
  * Buffers, or other special objects) to avoid compatibility issues.
  */
 function wrapExports(exports: unknown, pkgName: string): unknown {
+  if (exports === null || (typeof exports !== 'object' && typeof exports !== 'function')) {
+    return exports;
+  }
+
+  // Return the same wrapped object for repeated requires (identity + speed).
+  const cached = wrappedCache.get(exports as object);
+  if (cached !== undefined) return cached;
+
+  let wrapped: unknown;
+
   if (typeof exports === 'function') {
-    return wrapFn(exports as (...args: unknown[]) => unknown, pkgName);
+    wrapped = wrapFn(exports as (...args: unknown[]) => unknown, pkgName);
+  } else {
+    // Avoid wrapping special objects (Buffer, EventEmitter instances, etc.)
+    const proto = Object.getPrototypeOf(exports);
+    if (proto !== null && proto !== Object.prototype) {
+      wrappedCache.set(exports as object, exports);
+      return exports;
+    }
+
+    // Shallow-wrap own enumerable function properties
+    const obj: Record<string, unknown> = Object.create(proto);
+    for (const [key, value] of Object.entries(exports as Record<string, unknown>)) {
+      obj[key] = typeof value === 'function'
+        ? wrapFn(value as (...args: unknown[]) => unknown, pkgName)
+        : value;
+    }
+    wrapped = obj;
   }
 
-  if (exports === null || typeof exports !== 'object') return exports;
-
-  // Avoid wrapping special objects (Buffer, EventEmitter instances, etc.)
-  const proto = Object.getPrototypeOf(exports);
-  if (proto !== null && proto !== Object.prototype) return exports;
-
-  // Shallow-wrap own enumerable function properties
-  const wrapped: Record<string, unknown> = Object.create(proto);
-  for (const [key, value] of Object.entries(exports as Record<string, unknown>)) {
-    wrapped[key] = typeof value === 'function'
-      ? wrapFn(value as (...args: unknown[]) => unknown, pkgName)
-      : value;
-  }
+  wrappedCache.set(exports as object, wrapped);
   return wrapped;
 }
 
@@ -190,6 +215,18 @@ function wrapFn(fn: (...args: unknown[]) => unknown, pkgName: string): (...args:
   // Preserve prototype so instanceof checks still work
   if (fn.prototype !== undefined) {
     wrapper.prototype = fn.prototype;
+  }
+
+  // Copy the function's own static properties onto the wrapper. Many CJS
+  // packages export a function that carries statics (e.g. `express.Router`,
+  // `express.static`, `chalk.red`); dropping them would break those consumers.
+  // We copy the value as-is rather than re-wrapping — restoring behavior is the
+  // goal, and a static callable is still attributable via its own require
+  // context and the stack-walk fallback.
+  for (const key of Reflect.ownKeys(fn)) {
+    if (key === 'name' || key === 'length' || key === 'prototype') continue;
+    const desc = Object.getOwnPropertyDescriptor(fn, key);
+    if (desc) Object.defineProperty(wrapper, key, desc);
   }
   return wrapper;
 }

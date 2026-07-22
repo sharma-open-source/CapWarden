@@ -29,6 +29,50 @@ describe('interceptors/env', () => {
     }
   });
 
+  it('records env writes and deletes as accesses (not just reads)', () => {
+    const seen: string[] = [];
+    const interceptor = createEnvInterceptor({
+      log,
+      // Force attribution to a package so onAccess is exercised, and record the
+      // key each write/delete is charged to.
+      onAccess: (e) => {
+        if (e.detail.kind === 'env') seen.push(e.detail.key);
+      },
+    });
+    interceptor.install();
+    try {
+      process.env['CW_WRITE_KEY'] = '0';
+      delete process.env['CW_WRITE_KEY'];
+      const writeEvents = log.filter(
+        (e) => e.detail.kind === 'env' && e.detail.key === 'CW_WRITE_KEY'
+      );
+      // At least one event for the write and one for the delete.
+      expect(writeEvents.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      interceptor.uninstall();
+      delete process.env['CW_WRITE_KEY'];
+    }
+  });
+
+  it('blocks a write from a package in enforce mode (withholds the mutation)', () => {
+    const interceptor = createEnvInterceptor({
+      log,
+      onAccess: () => {
+        throw new CapWardenViolationError('leaky-pkg', 'env:NODE_TLS_REJECT_UNAUTHORIZED');
+      },
+    });
+    interceptor.install();
+    try {
+      const before = process.env['CW_ENFORCE_WRITE'];
+      // Assignment must not throw (Proxy set invariant) but must not take effect.
+      process.env['CW_ENFORCE_WRITE'] = 'tampered';
+      expect(process.env['CW_ENFORCE_WRITE']).toBe(before);
+    } finally {
+      interceptor.uninstall();
+      delete process.env['CW_ENFORCE_WRITE'];
+    }
+  });
+
   it('never records the env value — only the key (NFR-5)', () => {
     const interceptor = createEnvInterceptor({ log });
     interceptor.install();
