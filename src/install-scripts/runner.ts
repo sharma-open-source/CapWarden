@@ -23,6 +23,7 @@ import type { PolicyV1 } from '../policy/schema-v1.js';
 import { isGranted } from '../policy/schema-v1.js';
 import { isGrantedV2, type PolicyV2 } from '../policy/schema-v2.js';
 import type { InstallInventory } from './inventory.js';
+import { appendRequireFlag } from '../node-options.js';
 
 /** FR-8: one `install` capability event per package lifecycle script. */
 export function installEventsFromInventory(inventory: InstallInventory): AccessEvent[] {
@@ -109,7 +110,7 @@ export function runInstallScripts(options: RunInstallScriptsOptions): RunInstall
     const register = options.registerPath;
     const priorNodeOptions = process.env['NODE_OPTIONS'] ?? '';
     const nodeOptions = register
-      ? `${priorNodeOptions} --require ${register}`.trim()
+      ? appendRequireFlag(priorNodeOptions, register)
       : priorNodeOptions;
 
     const byPackage = new Map<string, string[]>();

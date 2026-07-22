@@ -21,6 +21,7 @@ import type { JsonReport } from '../report/json.js';
 import { buildInstallInventory, diffInventory, type InstallInventory } from '../install-scripts/inventory.js';
 import { runInstallScripts } from '../install-scripts/runner.js';
 import { buildCoverageReport } from '../report/coverage.js';
+import { appendRequireFlag } from '../node-options.js';
 
 const program = new Command();
 
@@ -50,8 +51,7 @@ function runUnderMode(
   extraEnv: Record<string, string>
 ): number {
   const register = path.resolve(__dirname, '..', 'register.js');
-  const priorNodeOptions = process.env['NODE_OPTIONS'] ?? '';
-  const nodeOptions = `${priorNodeOptions} --require ${register}`.trim();
+  const nodeOptions = appendRequireFlag(process.env['NODE_OPTIONS'] ?? '', register);
 
   const [cmd, ...args] = command;
   const child = spawnSync(cmd, args, {

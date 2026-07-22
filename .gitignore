@@ -7,3 +7,4 @@ capwarden-policy.json
 capwarden-inventory.json
 .devcontainer/
 .claude
+.DS_Store
