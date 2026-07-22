@@ -12,8 +12,22 @@
  * mitigated at GA by AsyncLocalStorage attribution (see async-context.ts).
  */
 
+import * as path from 'path';
 import { currentPackageFromContext } from './async-context.js';
 import { isFirstPartyPackage } from './workspaces.js';
+
+/**
+ * CapWarden's own code root (`dist/` at runtime, `src/` under tests). When
+ * installed as a dependency our frames live under `node_modules/capwarden/…`,
+ * so an unfiltered walk blames 'capwarden' for every access it intercepts —
+ * the interceptor itself is always the innermost frame. Our frames are never
+ * the accessor; skip them in both walkers.
+ */
+const CW_CODE_ROOT = path.resolve(__dirname, '..') + path.sep;
+
+function isOwnFrame(file: string): boolean {
+  return file.startsWith(CW_CODE_ROOT);
+}
 
 /**
  * Extract the innermost (most-specific) package name from an absolute file
@@ -70,14 +84,6 @@ export function attributeCurrentCall(): string {
 }
 
 /**
- * Matches CapWarden's own interceptor / attribution source frames so they can
- * be skipped when we need to inspect the code that *triggered* an intercepted
- * access.  Covers both the compiled `dist/` (.js) and test-time `src/` (.ts).
- */
-const CW_OWN_FRAME =
-  /[/\\](?:interceptors|attribution)[/\\][\w.-]+\.[cm]?[jt]s$/;
-
-/**
  * Classify the code that triggered the current intercepted access — i.e. the
  * first stack frame above CapWarden's own trap frames.
  *
@@ -108,7 +114,7 @@ export function classifyReaderContext(): 'internal' | 'external' {
 
     for (const frame of frames) {
       const file = frame.getFileName();
-      if (file && CW_OWN_FRAME.test(file)) continue; // our own trap frames
+      if (file && isOwnFrame(file)) continue; // our own trap/mode frames
       if (file === null) {
         // Native C++ frame (e.g. bindings reading env) counts as internal;
         // an anonymous non-native frame is skipped.
@@ -156,7 +162,7 @@ export function attributeFromStack(): string {
 
     for (const frame of frames) {
       const file = frame.getFileName();
-      if (!file) continue;
+      if (!file || isOwnFrame(file)) continue;
       const pkg = extractPackageFromPath(file);
       if (pkg) return pkg;
     }
