@@ -1,0 +1,62 @@
+{
+  "name": "capwarden",
+  "version": "0.1.0",
+  "description": "Per-dependency capability guard for Node.js / npm",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./register": {
+      "import": "./dist/register.mjs",
+      "require": "./dist/register.js"
+    },
+    "./hooks": "./dist/hooks.mjs"
+  },
+  "bin": {
+    "capwarden": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"const fs=require('fs'); ['register.mjs','hooks.mjs'].forEach(f=>fs.copyFileSync('src/'+f,'dist/'+f));\"",
+    "build:watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src tests",
+    "lint:fix": "eslint src tests --fix",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "bench": "node bench/attribution.mjs"
+  },
+  "keywords": [
+    "security",
+    "supply-chain",
+    "capability",
+    "npm",
+    "node"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/capwarden.git"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^2.0.0"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.js.map
+capwarden-report.json
+capwarden-policy.json
+capwarden-inventory.json
+.cluade
+.devcontainer
