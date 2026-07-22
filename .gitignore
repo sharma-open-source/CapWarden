@@ -5,5 +5,5 @@ coverage/
 capwarden-report.json
 capwarden-policy.json
 capwarden-inventory.json
-.cluade
-.devcontainer
+.devcontainer/
+.claude

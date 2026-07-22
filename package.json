@@ -1,6 +1,6 @@
 {
   "name": "capwarden",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Per-dependency capability guard for Node.js / npm",
   "type": "commonjs",
   "main": "dist/index.js",
@@ -39,8 +39,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-org/capwarden.git"
+    "url": "git+https://github.com/sharma-open-source/CapWarden.git"
   },
+  "bugs": {
+    "url": "https://github.com/sharma-open-source/CapWarden/issues"
+  },
+  "homepage": "https://github.com/sharma-open-source/CapWarden#readme",
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^9.39.5",

@@ -1,5 +1,11 @@
 # CapWarden
 
+[![CI](https://github.com/sharma-open-source/CapWarden/actions/workflows/ci.yml/badge.svg)](https://github.com/sharma-open-source/CapWarden/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/capwarden.svg)](https://www.npmjs.com/package/capwarden)
+[![node](https://img.shields.io/node/v/capwarden.svg)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/capwarden.svg)](LICENSE)
+[![types](https://img.shields.io/npm/types/capwarden.svg)](https://www.typescriptlang.org)
+
 **Per-dependency capability guard for Node.js / npm.**
 
 Every dependency in a Node project runs with the full privileges of the
